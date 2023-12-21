@@ -8,7 +8,7 @@ CREATE TABLE `youtube_harvesting`.`channel` (
 `channel_type` VARCHAR(255) NOT NULL COMMENT 'Type of the channel' , 
 `channel_views` INT  COMMENT 'Total number of views for the channel' , 
 `channel_description` TEXT NULL COMMENT 'Description of the channel' , 
-`channel_status` VARCHAR(255) NOT NULL COMMENT 'Status of the channel' ,
+`channel_status` VARCHAR(255) NULL COMMENT 'Status of the channel' ,
 `channel_video_count` INT COMMENT 'Total number of videos for the channel',
 PRIMARY KEY (channel_id)
 ) ENGINE = InnoDB 

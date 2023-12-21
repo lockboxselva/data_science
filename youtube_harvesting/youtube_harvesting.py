@@ -27,19 +27,22 @@ def fetch_channel_info( channel_id):
                         Playlist_Id=i['contentDetails']['relatedPlaylists']['uploads']
                         )
     except Exception as e:
+        print(e)
         raise Exception(f"Error fetching channel information: {e}")
     return data
 def extract_video_ids(channel_id):
     try:
         youtube_api = connect_to_api()
-        video_ids = []
+        video_dict = {}
         playlist_request = youtube_api.channels().list(id = channel_id, #channel_id
                                             part ="contentDetails") 
         playlist_response = playlist_request.execute()
         playlist_id = playlist_response['items'][0]['contentDetails']['relatedPlaylists']['uploads']
-
+        print("playlist_id ==> ",playlist_id)
+        playlist=""
         next_page_token =  None
-
+        video_ids = []
+        print("Before while")
         while True:
             playlist_item_request = youtube_api.playlistItems().list(part="snippet", 
                                                                 playlistId=playlist_id,
@@ -48,46 +51,56 @@ def extract_video_ids(channel_id):
             playlist_item_response = playlist_item_request.execute()
 
             for i in range (len(playlist_item_response['items'])):
+                print("Playlistitem response - ",playlist_item_response['items'][i])
                 video_ids.append(playlist_item_response['items'][i]['snippet']['resourceId']['videoId'])
+                playlist = playlist_item_response['items'][i]['snippet']['playlistId']
+                #print("video dict ==> ",video_ids,playlist)
             next_page_token = playlist_item_response.get('nextPageToken')
             if not next_page_token:
+                print("Inside no next page token")
+                video_dict[playlist] = video_ids 
+                video_ids =[]
+                playlist = ""
                 break
     except Exception as e:
+        print(e)
         raise Exception(e) 
-    return video_ids
+    return video_dict
 
-def extract_video_details(video_ids):
+def extract_video_details(videos_dict):
     try:
         youtube_api = connect_to_api()
         video_data_list = []
-        for video_id in video_ids:
-            video_request = youtube_api.videos().list(
-                part = 'snippet, contentDetails, statistics',
-                id = video_id
-            )
-            video_response = video_request.execute()
+        for playlist_id in list(videos_dict.keys()):
 
-            for item in video_response['items']:
-                #print("video_detail : ", item)
-                data = dict(#Channel_Name = item['snippet']['channelTitle'],
-                            #Channel_Id = item['snippet']['channelId'],
-                            Video_Id = item['id'],
-                            Video_Name = item['snippet']['title'],
-                            Tags = item['snippet'].get('tags'),
-                            Thumbnail = item['snippet']['thumbnails']['default']['url'],
-                            Video_Description = item['snippet'].get('description'),
-                            PublishedAt=item['snippet']['publishedAt'],
-                            Duration = item['contentDetails']['duration'],
-                            View_Count = item['statistics'].get('viewCount'),
-                            Like_Count = item['statistics'].get('likeCount') , #check here
-                            Dislike_Count = item['statistics'].get('dislikeCount') , #check here
-                            Comment_Count = item['statistics'].get('commentCount'),
-                            Favorite_Count = item['statistics']['favoriteCount'],
-                            #video_definition_type = item['contentDetails']['definition'],
-                            Caption_Status = item['contentDetails']['caption']
-                            )
-                video_data_list.append(data)
+            for video_id in videos_dict[playlist_id]:
+                video_request = youtube_api.videos().list(
+                    part = 'snippet, contentDetails, statistics',
+                    id = video_id
+                )
+                video_response = video_request.execute()
+
+                for item in video_response['items']:
+                    #print("video_detail : ", item)
+                    data = dict(
+                                Video_Id = item['id'],
+                                Playlist_Id = playlist_id,
+                                Video_Name = item['snippet']['title'],
+                                Tags = item['snippet'].get('tags'),
+                                Thumbnail = item['snippet']['thumbnails']['default']['url'],
+                                Video_Description = item['snippet'].get('description'),
+                                PublishedAt=item['snippet']['publishedAt'],
+                                Duration = item['contentDetails']['duration'],
+                                View_Count = item['statistics'].get('viewCount'),
+                                Like_Count = item['statistics'].get('likeCount') , 
+                                Dislike_Count = item['statistics'].get('dislikeCount') , 
+                                Comment_Count = item['statistics'].get('commentCount'),
+                                Favorite_Count = item['statistics']['favoriteCount'],
+                                Caption_Status = item['contentDetails']['caption']
+                                )
+                    video_data_list.append(data)
     except Exception as e:
+        print(e)
         raise Exception(e)
     return video_data_list
 
@@ -112,6 +125,7 @@ def extract_comments_details(video_ids):
                                 )
                     comments_list.append(data)
             except HttpError as e:
+                print(e)
                 if e.resp.status == 403:
                     error_reason = e.error_details[0]['reason']
                     if error_reason == 'commentsDisabled':
@@ -122,6 +136,7 @@ def extract_comments_details(video_ids):
                 else:
                     Exception(e)
     except Exception as e:
+        print(e)
         raise Exception(e) 
     return comments_list
 
@@ -141,7 +156,7 @@ def extract_playlist_details(channel_id):
             playlist_response = playlist_request.execute()
 
             for playlist in playlist_response['items']:
-                #print("playlist1 : ", playlist)
+                print("playlist1 : ", playlist)
                 data = dict(
                     playlist_id = playlist['id'],
                     playlist_title = playlist['snippet']['title'],
@@ -155,6 +170,7 @@ def extract_playlist_details(channel_id):
             if not next_page_token:
                 break
     except Exception as e:
+        print(e)
         raise Exception(e)
     return playlist_details
 
@@ -162,10 +178,15 @@ def build_channel_details(channel_id, db):
     try:
         youtube_api = connect_to_api()
         channel_details = fetch_channel_info(channel_id)
+        print("channel_details")
         playlist_details = extract_playlist_details(channel_id)
-        video_ids = extract_video_ids(channel_id)
-        video_details = extract_video_details(video_ids)
-        comments_details = extract_comments_details(video_ids)
+        print("playlist_details")
+        video_dict = extract_video_ids(channel_id)
+        print("video_dict")
+        video_details = extract_video_details(video_dict)
+        print("video_details")
+        comments_details = extract_comments_details(video_dict.values())
+        print("comments_details")
         collection_channel = db["channelDetails"]
         collection_channel.insert_one({"channel_information": channel_details,
                                        "playlist_information": playlist_details,
@@ -173,6 +194,7 @@ def build_channel_details(channel_id, db):
                                        "comment_information": comments_details
                                        })
     except Exception as e:
+        print(e)
         raise Exception(f"Error building channel details: {e}")
     return "Channel Information saved to MongoDB!"
 def load_channel_data_to_SQL(channel_id):
@@ -185,14 +207,14 @@ def load_channel_data_to_SQL(channel_id):
         channelList.append(channel["channel_information"])
     channelDataFrame = pd.DataFrame(channelList)
     for index, row in channelDataFrame.iterrows():
-        insert_query='''INSERT INTO CHANNEL(
-                                        CHANNEL_ID,
-                                        CHANNEL_NAME,
-                                        CHANNEL_DESCRIPTION,
-                                        CHANNEL_STATUS,
-                                        CHANNEL_TYPE,
-                                        CHANNEL_VIEWS,
-                                        channel_video_count)
+        insert_query='''INSERT INTO channel(
+                                        `channel_id`,
+                                        `channel_name`,
+                                        `channel_description`,
+                                        `channel_status`,
+                                        `channel_type`,
+                                        `channel_views`,
+                                        `channel_video_count`)
                         VALUES( %s,%s,%s,%s,%s,%s,%s)'''
         values = (row['Channel_Id'],
                 row['Channel_Name'],
@@ -205,11 +227,12 @@ def load_channel_data_to_SQL(channel_id):
             cursor.execute(insert_query,values)
             sql_db.commit()
         except mysql.connector.Error as err:
+                print(err)
                 if err.errno == errorcode.ER_DUP_ENTRY:
                     print(f"Duplicate entry for channel ID: {row['Channel_Id']}. Skipping...")
                     continue  # Skip to the next channel
                 else:
-                    raise Exception(e)
+                    raise Exception(err)
         except Exception as e:
             print(row['Channel_Id'],e)
             raise Exception(e)
@@ -232,21 +255,22 @@ def load_playlist_data_to_SQL(channel_id):
         if playlist_id is None or channel_id is None or playlist_title is None:
             print(f"Skipping row {index} due to missing values.")
             continue
-        insert_query='''INSERT INTO PLAYLIST(
-                                        PLAYLIST_ID,
-                                        CHANNEL_ID,
-                                        PLAYLIST_NAME)
+        insert_query='''INSERT INTO `playlist`(
+                                        `playlist_id`,
+                                        `channel_id`,
+                                        `playlist_name`)
                         VALUES( %s,%s,%s)'''
         values = (playlist_id,channel_id,playlist_title)
         try:
             cursor.execute(insert_query,values)
             sql_db.commit()
         except mysql.connector.Error as err:
+                print(err)
                 if err.errno == errorcode.ER_DUP_ENTRY:
                     print(f"Duplicate entry for playlist ID: {playlist_id}. Skipping...")
                     continue  # Skip to the next playlist
                 else:
-                    raise Exception(e)
+                    raise Exception(err)
         except Exception as e:
             print(row.get('playlist_id'),e)
             raise Exception(e)
@@ -265,10 +289,10 @@ def load_video_data_to_SQL(channel_id):
     videoDataFrame = pd.DataFrame(videoList)
     for index, row in videoDataFrame.iterrows():
         #print(index)
-        #print(row)
+        print("Video => ",row)
         video_id=row.get('Video_Id')
-        #playlist_id=row.get('Playlist_Id','PLJYf0JdTApCoAWBCGq1CBysA6Tx3ALIcQ')
-        playlist_id='PLRCiS0r_uoCEytZb1L53tZbOw5L6PIKXk'
+        playlist_id=row.get('Playlist_Id')
+        #playlist_id='PLRCiS0r_uoCEytZb1L53tZbOw5L6PIKXk'
         video_name=row.get('Video_Name')
         video_description=row.get('Video_Description')
         input_datetime = datetime.strptime(row.get('PublishedAt'), '%Y-%m-%dT%H:%M:%SZ')
@@ -284,6 +308,7 @@ def load_video_data_to_SQL(channel_id):
         minutes = 0
         seconds = 0
         duration_str = row.get('Duration')
+        print("duration_str :" ,duration_str)
         if 'M' in duration_str:
             minutes_index = duration_str.index('M')
             minutes = int(duration_str[2:minutes_index])
@@ -295,13 +320,14 @@ def load_video_data_to_SQL(channel_id):
 
         # Calculate total duration in seconds
         total_seconds = minutes * 60 + seconds
+        print("total_seconds:",total_seconds)
         # Create a timedelta object
         duration=total_seconds
 
         thumbnail=row['Thumbnail']
         caption_status=row.get('Caption_Status')
 
-        insert_query='''INSERT INTO VIDEOS(
+        insert_query='''INSERT INTO `videos`(
                                         video_id,
                                         playlist_id,
                                         video_name,
@@ -334,11 +360,12 @@ def load_video_data_to_SQL(channel_id):
             cursor.execute(insert_query,values)
             sql_db.commit()
         except mysql.connector.Error as err:
+                print(err)
                 if err.errno == errorcode.ER_DUP_ENTRY:
                     print(f"Duplicate entry for Video ID: {video_id}. Skipping...")
                     continue  # Skip to the next Video
                 else:
-                    raise Exception(e)
+                    raise Exception(err)
         except Exception as e:
             print(video_id,e)
             raise Exception(e)
@@ -367,7 +394,7 @@ def load_comments_data_to_SQL(channel_id):
         input_datetime = datetime.strptime(row.get('Comment_PublishedAt'), '%Y-%m-%dT%H:%M:%SZ')
         comment_published_date = input_datetime.strftime('%Y-%m-%d %H:%M:%S')
 
-        insert_query='''INSERT INTO COMMENT(
+        insert_query='''INSERT INTO `comment`(
                                         comment_id,
                                         video_id,
                                         comment_text,
@@ -384,11 +411,12 @@ def load_comments_data_to_SQL(channel_id):
             cursor.execute(insert_query,values)
             sql_db.commit()
         except mysql.connector.Error as err:
+                print(err)
                 if err.errno == errorcode.ER_DUP_ENTRY:
                     print(f"Duplicate entry for Comment ID: {comment_id}. Skipping...")
                     continue  # Skip to the next Comment
                 else:
-                    raise Exception(e)
+                    raise Exception(err)
         except Exception as e:
             print(comment_id,e)
             raise Exception(e)
@@ -451,7 +479,7 @@ def connect_to_sql():
     db = mysql.connector.connect(
         host="localhost",
         user="root",
-        password="password",
+        password="Summer1$",
         database='youtube_harvesting'
     )
     return db
